@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Japan in Numbers — a visual guide to Japan's statistics</title>
+<meta name="description" content="Japan's shrinking, ageing population in hand-drawn charts: 123.8 million people, 29.3% aged 65+, a 2008 peak, all 47 prefectures and the economy behind it.">
+<meta name="theme-color" content="#1a2547">
+<meta property="og:title" content="Japan in Numbers">
+<meta property="og:description" content="A visual guide to Japan's statistics: the ageing population, the 47 prefectures, and the economy underneath.">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-head">
+  <div class="head-inner">
+    <a class="brand" href="#/">
+      <span class="brand-dot" aria-hidden="true"></span>
+      <span class="brand-text">Japan in Numbers<small>a visual guide to Japan's statistics</small></span>
+    </a>
+    <nav class="main-nav" aria-label="Sections">
+      <a href="#/" data-nav="overview">Overview</a>
+      <a href="#/people" data-nav="people">People</a>
+      <a href="#/regions" data-nav="regions">Regions</a>
+      <a href="#/economy" data-nav="economy">Economy &amp; society</a>
+    </nav>
+  </div>
+</header>
+
+<main id="app" class="page"></main>
+
+<footer class="site-foot">
+  <p><strong>Japan in Numbers.</strong> The figures are the commonly cited official readings from the
+  Statistics Bureau of Japan, the Ministry of Health, Labour and Welfare (MHLW), the National
+  Institute of Population and Social Security Research (IPSS) and the World Bank; long series are
+  smooth readings pinned to those anchors, and every chart names its source. A static site:
+  no tracking, no network calls, no build step.</p>
+</footer>
+
+<div id="tooltip" class="tooltip" hidden></div>
+<script type="module" src="main.js"></script>
+</body>
+</html>
