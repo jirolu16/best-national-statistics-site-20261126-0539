@@ -1,52 +1,47 @@
 /**
- * Japan in Numbers - build and dossier tool.
+ * Japan in Numbers - hand-in program for the make.fun entry.
  *
- * This program is the entrypoint for the make.fun entry. It does not
- * bundle or transform the site (the site is plain static files); its
- * job is to prove the entry is complete and self-describing:
+ * The site itself is a handful of static files under app/, plus four
+ * screenshots under screenshots/. This program is the courier between
+ * that repository and the grader:
  *
- *   1. It checks that every file the site needs is present in app/.
- *   2. It reads the metadata and series out of app/data.js by lifting
- *      the JSON-compatible literals the site itself renders from, so
- *      the dossier can never drift away from the shipped data.
- *   3. It inventories every file in the entry with its byte size.
- *   4. It writes the result to out/dossier.json and prints a summary.
+ *   - it sanity-checks app/ so a broken entry fails loudly here
+ *     instead of silently at scoring time,
+ *   - it copies app/ and screenshots/ into the output directory
+ *     (MAKEFUN_OUTPUT_DIR when the environment sets one, "/output"
+ *     otherwise),
+ *   - and it writes the dossier for that output directory with the
+ *     vendored buildDossier helper, under the bounty's caps.
  *
- * Usage: node main.ts [--root DIR] [--out FILE]
- * Defaults: root is this file's directory, out is <root>/out/dossier.json.
+ * Nothing is ever written back into the repository: on the grader the
+ * snapshot is read-only, so the repo is treated as a source, never a
+ * scratchpad. Unknown command-line arguments are ignored on purpose;
+ * a stray flag from a wrapper script must not sink the hand-in.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildDossier } from "./vendor/makefun-frontend.ts";
 
-interface CliOptions {
-  root: string;
-  out: string;
-}
+/** The caps the bounty prescribes for the dossier build. */
+const HANDIN_CAPS = {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
+  app_max_files: 993,
+  app_max_bytes: 16777216,
+};
 
-interface FileRecord {
-  path: string;
-  bytes: number;
-}
-
-interface SiteMeta {
-  title: string;
-  country: string;
-  tagline: string;
-  sections: string[];
-  sources: string[];
-  indicators: unknown[];
-}
-
-interface JapanData {
-  populationSeries: unknown[];
-  gdpSeries: unknown[];
-  prefectures: unknown[];
-  glanceFacts: unknown[];
-}
-
-const REQUIRED_APP_FILES: string[] = [
+/** Files the site cannot boot without; each must exist and be non-empty. */
+const APP_FILES_REQUIRED: string[] = [
   "index.html",
   "style.css",
   "data.js",
@@ -54,190 +49,183 @@ const REQUIRED_APP_FILES: string[] = [
   "views.js",
 ];
 
-function parseArgs(argv: string[]): CliOptions {
-  const here = dirname(fileURLToPath(import.meta.url));
-  let root = here;
-  let out = "";
+/**
+ * Where the repository lives. The default is this file's own folder,
+ * derived from import.meta.url so the answer never depends on the
+ * caller's working directory. A "--root DIR" pair anywhere in argv
+ * overrides it; every other argument is skipped without complaint.
+ */
+function repoRootFromArgs(argv: string[]): string {
+  let root = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--root" && i + 1 < argv.length) {
-      root = resolve(argv[++i]);
-    } else if (arg === "--out" && i + 1 < argv.length) {
-      out = resolve(argv[++i]);
-    } else if (arg === "--help" || arg === "-h") {
-      printUsage();
-      process.exit(0);
-    } else {
-      throw new Error("unknown argument: " + arg);
+    if (argv[i] === "--root" && i + 1 < argv.length) {
+      root = resolve(argv[i + 1]);
+      i++;
     }
   }
-  if (out === "") {
-    out = join(root, "out", "dossier.json");
-  }
-  return { root: root, out: out };
-}
-
-function printUsage(): void {
-  console.log("Usage: node main.ts [--root DIR] [--out FILE]");
-  console.log("Validates app/ and writes the entry dossier JSON.");
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) { return n + " B"; }
-  if (n < 1024 * 1024) { return (n / 1024).toFixed(1) + " KiB"; }
-  return (n / (1024 * 1024)).toFixed(2) + " MiB";
+  return root;
 }
 
 /**
- * Extract the object literal assigned to `const NAME = { ... };` in a
- * JavaScript source file and parse it as JSON. The data file is
- * written to make this safe: double-quoted keys, no comments or brace
- * characters inside the literal. The scanner still tracks string
- * state so braces inside quoted text would not break the matching.
+ * Collect every reason app/ is not shippable, or an empty list when it
+ * is. Beyond presence and size, index.html must actually reference the
+ * stylesheet and the three scripts, because a page that never loads
+ * its data renders as an empty shell.
  */
-function extractLiteral(source: string, name: string): unknown {
-  const marker = "const " + name + " =";
-  const at = source.indexOf(marker);
-  if (at < 0) {
-    throw new Error("could not find '" + marker + "' in app/data.js");
-  }
-  const start = source.indexOf("{", at);
-  if (start < 0) {
-    throw new Error("no object literal after '" + marker + "'");
-  }
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < source.length; i++) {
-    const ch = source[i];
-    if (inString) {
-      if (escaped) { escaped = false; }
-      else if (ch === "\\") { escaped = true; }
-      else if (ch === '"') { inString = false; }
-      continue;
-    }
-    if (ch === '"') { inString = true; }
-    else if (ch === "{") { depth++; }
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) {
-        const text = source.slice(start, i + 1);
-        try {
-          return JSON.parse(text);
-        } catch (err) {
-          throw new Error("failed to parse " + name + " literal: " + String(err));
-        }
-      }
-    }
-  }
-  throw new Error("unbalanced braces in " + name + " literal");
-}
-
-function validateApp(root: string): string[] {
+function appProblems(root: string): string[] {
   const problems: string[] = [];
   const appDir = join(root, "app");
   if (!existsSync(appDir)) {
-    problems.push("missing app/ directory");
+    problems.push("app/ directory is missing");
     return problems;
   }
-  for (const name of REQUIRED_APP_FILES) {
-    const file = join(appDir, name);
-    if (!existsSync(file)) {
-      problems.push("missing required file app/" + name);
-    } else if (statSync(file).size === 0) {
-      problems.push("required file app/" + name + " is empty");
+  for (const name of APP_FILES_REQUIRED) {
+    const target = join(appDir, name);
+    if (!existsSync(target)) {
+      problems.push("app/" + name + " is missing");
+    } else if (statSync(target).size === 0) {
+      problems.push("app/" + name + " is empty");
     }
   }
-  const indexHtml = join(appDir, "index.html");
-  if (existsSync(indexHtml)) {
-    const html = readFileSync(indexHtml, "utf8");
-    for (const needed of ["data.js", "views.js", "main.js", "style.css"]) {
-      if (!html.includes(needed)) {
-        problems.push("app/index.html does not reference " + needed);
+  const indexPath = join(appDir, "index.html");
+  if (existsSync(indexPath)) {
+    const html = readFileSync(indexPath, "utf8");
+    for (const ref of ["style.css", "data.js", "main.js", "views.js"]) {
+      if (html.indexOf(ref) === -1) {
+        problems.push("app/index.html never references " + ref);
       }
     }
   }
   return problems;
 }
 
-function countIndicators(meta: SiteMeta, data: JapanData): number {
-  return (
-    meta.indicators.length +
-    data.populationSeries.length +
-    data.gdpSeries.length +
-    data.prefectures.length +
-    data.glanceFacts.length
-  );
-}
-
-function inventory(root: string): FileRecord[] {
-  const records: FileRecord[] = [];
-  const skipDirs = new Set(["out", "node_modules", ".git"]);
-  function walk(dir: string): void {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    for (const entry of entries) {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!skipDirs.has(entry.name)) { walk(full); }
-      } else if (entry.isFile()) {
-        const rel = relative(root, full).split(sep).join("/");
-        records.push({ path: rel, bytes: statSync(full).size });
+/**
+ * Lift the object literal bound by `const NAME = { ... };` out of a
+ * JavaScript source text and hand it back parsed. The walk is
+ * string-aware: a brace that appears inside a double-quoted string
+ * (or right after a backslash escape) does not move the depth
+ * counter, so the scan stops at the literal's true closing brace.
+ * data.js keeps its literals JSON-shaped, so JSON.parse finishes
+ * the job.
+ */
+function liftObjectLiteral(source: string, name: string): Record<string, unknown> {
+  const binding = "const " + name + " =";
+  const bindingAt = source.indexOf(binding);
+  if (bindingAt === -1) {
+    throw new Error("app/data.js has no '" + binding + "' binding");
+  }
+  const open = source.indexOf("{", bindingAt);
+  if (open === -1) {
+    throw new Error("no '{' follows '" + binding + "' in app/data.js");
+  }
+  let depth = 0;
+  let quoted = false;
+  let afterBackslash = false;
+  for (let i = open; i < source.length; i++) {
+    const ch = source.charAt(i);
+    if (quoted) {
+      if (afterBackslash) {
+        afterBackslash = false;
+      } else if (ch === "\\") {
+        afterBackslash = true;
+      } else if (ch === '"') {
+        quoted = false;
+      }
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return JSON.parse(source.slice(open, i + 1)) as Record<string, unknown>;
       }
     }
   }
-  walk(root);
-  records.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return records;
+  throw new Error("the " + name + " literal in app/data.js never closes");
 }
 
-function main(): void {
-  const opts = parseArgs(process.argv.slice(2));
+/** Length of a value when it is an array, zero for anything else. */
+function listLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
 
-  const problems = validateApp(opts.root);
+/**
+ * The site's countable content: the headline indicators from the
+ * metadata plus every row of the four data collections (population
+ * series, GDP series, prefecture table, at-a-glance facts).
+ */
+function countIndicators(meta: Record<string, unknown>, data: Record<string, unknown>): number {
+  let total = listLength(meta["indicators"]);
+  total += listLength(data["populationSeries"]);
+  total += listLength(data["gdpSeries"]);
+  total += listLength(data["prefectures"]);
+  total += listLength(data["glanceFacts"]);
+  return total;
+}
+
+/**
+ * Copy a directory tree into place, creating folders as needed and
+ * overwriting whatever a previous run left behind, so stale files
+ * from an older build can never linger in the hand-in. Returns how
+ * many files were copied.
+ */
+function copyTree(sourceDir: string, targetDir: string): number {
+  mkdirSync(targetDir, { recursive: true });
+  let copied = 0;
+  const entries = readdirSync(sourceDir, { withFileTypes: true });
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const entry of entries) {
+    const from = join(sourceDir, entry.name);
+    const to = join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copied += copyTree(from, to);
+    } else if (entry.isFile()) {
+      copyFileSync(from, to);
+      copied += 1;
+    }
+  }
+  return copied;
+}
+
+function run(): void {
+  const root = repoRootFromArgs(process.argv.slice(2));
+
+  const problems = appProblems(root);
   if (problems.length > 0) {
-    console.error("Entry validation failed:");
-    for (const p of problems) { console.error("  - " + p); }
+    console.error("app/ failed validation, nothing was handed in:");
+    for (const problem of problems) {
+      console.error("  - " + problem);
+    }
     process.exit(1);
   }
 
-  const dataSource = readFileSync(join(opts.root, "app", "data.js"), "utf8");
-  const meta = extractLiteral(dataSource, "SITE_META") as SiteMeta;
-  const data = extractLiteral(dataSource, "JAPAN_DATA") as JapanData;
+  const dataSource = readFileSync(join(root, "app", "data.js"), "utf8");
+  const meta = liftObjectLiteral(dataSource, "SITE_META");
+  const japan = liftObjectLiteral(dataSource, "JAPAN_DATA");
+  const indicatorCount = countIndicators(meta, japan);
 
-  const files = inventory(opts.root);
-  const totalBytes = files.reduce((sum, f) => sum + f.bytes, 0);
-  const indicatorCount = countIndicators(meta, data);
+  const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
+  mkdirSync(outDir, { recursive: true });
 
-  const dossier = {
-    site: meta.title,
-    country: meta.country,
-    tagline: meta.tagline,
-    sections: meta.sections,
-    indicatorCount: indicatorCount,
-    dataSources: meta.sources,
-    dataFile: "app/data.js",
-    series: {
-      populationPoints: data.populationSeries.length,
-      gdpPoints: data.gdpSeries.length,
-      prefectures: data.prefectures.length,
-      headlineIndicators: meta.indicators.length,
-    },
-    files: files,
-    totalFiles: files.length,
-    totalBytes: totalBytes,
-  };
+  let filesCopied = 0;
+  filesCopied += copyTree(join(root, "app"), join(outDir, "app"));
+  const shotsDir = join(root, "screenshots");
+  if (existsSync(shotsDir)) {
+    filesCopied += copyTree(shotsDir, join(outDir, "screenshots"));
+  }
 
-  mkdirSync(dirname(opts.out), { recursive: true });
-  writeFileSync(opts.out, JSON.stringify(dossier, null, 2) + "\n", "utf8");
+  const dossierPath = join(outDir, "dossier.json");
+  writeFileSync(dossierPath, buildDossier(outDir, HANDIN_CAPS));
 
-  console.log(meta.title + " - entry dossier");
-  console.log("  country:        " + meta.country);
-  console.log("  sections:       " + meta.sections.join(", "));
-  console.log("  indicators:     " + indicatorCount + " counted data points and figures");
-  console.log("  data sources:   " + meta.sources.join("; "));
-  console.log("  files:          " + files.length + " (" + formatBytes(totalBytes) + " total)");
-  console.log("  dossier written: " + opts.out);
+  const sections = Array.isArray(meta["sections"]) ? meta["sections"] : [];
+  console.log("Japan in Numbers hand-in complete");
+  console.log("  site title:  " + String(meta["title"] ?? "(untitled)"));
+  console.log("  country:     " + String(meta["country"] ?? "(unknown)"));
+  console.log("  sections:    " + sections.join(", "));
+  console.log("  indicators:  " + indicatorCount);
+  console.log("  files copied: " + filesCopied);
+  console.log("  dossier:     " + dossierPath);
 }
 
-main();
+run();
