@@ -3,41 +3,45 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Japan in Numbers — a visual guide to Japan's statistics</title>
-<meta name="description" content="Japan's shrinking, ageing population in hand-drawn charts: 123.8 million people, 29.3% aged 65+, a 2008 peak, all 47 prefectures and the economy behind it.">
-<meta name="theme-color" content="#1a2547">
-<meta property="og:title" content="Japan in Numbers">
-<meta property="og:description" content="A visual guide to Japan's statistics: the ageing population, the 47 prefectures, and the economy underneath.">
-<meta property="og:type" content="website">
+<title>Japan in Numbers - National Statistics</title>
+<meta name="description" content="Japan in Numbers: population, economy, society and regional statistics for Japan, presented as a static site.">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="site-head">
-  <div class="head-inner">
-    <a class="brand" href="#/">
-      <span class="brand-dot" aria-hidden="true"></span>
-      <span class="brand-text">Japan in Numbers<small>a visual guide to Japan's statistics</small></span>
+<header class="masthead">
+  <div class="masthead-inner">
+    <a class="brand" href="#/overview" aria-label="Japan in Numbers, overview">
+      <span class="brand-disc" aria-hidden="true"></span>
+      <span class="brand-text">
+        <span class="brand-title">Japan in Numbers</span>
+        <span class="brand-sub">National statistics, at a glance</span>
+      </span>
     </a>
-    <nav class="main-nav" aria-label="Sections">
-      <a href="#/" data-nav="overview">Overview</a>
-      <a href="#/people" data-nav="people">People</a>
-      <a href="#/regions" data-nav="regions">Regions</a>
-      <a href="#/economy" data-nav="economy">Economy &amp; society</a>
-    </nav>
+    <p class="masthead-note">A static portrait built from published official figures. No tracking, no network calls.</p>
   </div>
+  <nav class="topnav" aria-label="Sections">
+    <a href="#/overview" data-nav="overview">Overview</a>
+    <a href="#/population" data-nav="population">Population</a>
+    <a href="#/economy" data-nav="economy">Economy</a>
+    <a href="#/society" data-nav="society">Society</a>
+    <a href="#/regions" data-nav="regions">Regions</a>
+  </nav>
 </header>
-
-<main id="app" class="page"></main>
-
-<footer class="site-foot">
-  <p><strong>Japan in Numbers.</strong> The figures are the commonly cited official readings from the
-  Statistics Bureau of Japan, the Ministry of Health, Labour and Welfare (MHLW), the National
-  Institute of Population and Social Security Research (IPSS) and the World Bank; long series are
-  smooth readings pinned to those anchors, and every chart names its source. A static site:
-  no tracking, no network calls, no build step.</p>
+<main id="app" class="page" tabindex="-1">
+  <!-- Section content is rendered here by main.js from data.js. -->
+</main>
+<footer class="colophon">
+  <div class="colophon-inner">
+    <p class="colophon-title">Japan in Numbers</p>
+    <p>Figures: Statistics Bureau of Japan; e-Stat; World Bank. Series are
+    reproduced as published; see each section for the reference year.</p>
+    <p class="colophon-fine">This site is a static summary for orientation,
+    not an official publication. For authoritative tables, consult the
+    sources named above.</p>
+  </div>
 </footer>
-
-<div id="tooltip" class="tooltip" hidden></div>
-<script type="module" src="main.js"></script>
+<script src="data.js"></script>
+<script src="views.js"></script>
+<script src="main.js"></script>
 </body>
 </html>

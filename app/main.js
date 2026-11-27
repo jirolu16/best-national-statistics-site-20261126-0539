@@ -1,45 +1,53 @@
-// Japan in Numbers — the hash router.
-//
-// Routes: #/ overview, #/people, #/regions, #/economy. The router runs
-// once on load and again on every hash change, so each section renders
-// fully on first paint and is reachable by its own link.
+/*
+ * Japan in Numbers - router.
+ *
+ * Hash routing only: #/overview, #/population, #/economy, #/society,
+ * #/regions. The route is read on load and on every hashchange; the
+ * matching view from views.js is rendered into the <main> element and
+ * then mounted so its charts and controls can attach to the live DOM.
+ */
+"use strict";
 
-import {
-  bindPeople, bindRegions, bindTooltips, economyView, overviewView,
-  peopleView, regionsView,
-} from './views.js';
+const KNOWN_ROUTES = ["overview", "population", "economy", "society", "regions"];
+const DEFAULT_ROUTE = "overview";
 
-const ROUTES = {
-  overview: { render: overviewView, bind: null, title: 'Japan in Numbers — overview' },
-  people: { render: peopleView, bind: bindPeople, title: 'Japan in Numbers — people' },
-  regions: { render: regionsView, bind: bindRegions, title: 'Japan in Numbers — regions' },
-  economy: { render: economyView, bind: null, title: 'Japan in Numbers — economy & society' },
-};
+function routeFromHash() {
+  const raw = window.location.hash.replace(/^#\/?/, "").trim().toLowerCase();
+  const first = raw.split("/")[0];
+  return KNOWN_ROUTES.indexOf(first) >= 0 ? first : DEFAULT_ROUTE;
+}
 
-function currentRoute() {
-  const raw = window.location.hash.replace(/^#\/?/, '').split('/')[0] ?? '';
-  if (raw !== '' && !Object.hasOwn(ROUTES, raw)) {
-    // An unknown hash (a typo, an old bookmark) falls back to the
-    // overview and the address bar is corrected to match.
-    window.history.replaceState(null, '', '#/');
-    return 'overview';
-  }
-  return raw === '' ? 'overview' : raw;
+function setActiveNav(route) {
+  document.querySelectorAll(".topnav a[data-nav]").forEach(function (a) {
+    const on = a.getAttribute("data-nav") === route;
+    a.classList.toggle("is-active", on);
+    if (on) { a.setAttribute("aria-current", "page"); }
+    else { a.removeAttribute("aria-current"); }
+  });
 }
 
 function render() {
-  const name = currentRoute();
-  const route = ROUTES[name];
-  const app = document.getElementById('app');
-  app.innerHTML = route.render();
-  document.title = route.title;
-  document.querySelectorAll('[data-nav]').forEach((a) => {
-    a.classList.toggle('active', a.getAttribute('data-nav') === name);
-  });
-  bindTooltips(app);
-  if (route.bind) route.bind(app);
-  window.scrollTo(0, 0);
+  const route = routeFromHash();
+  const view = window.VIEWS[route] || window.VIEWS[DEFAULT_ROUTE];
+  const main = document.getElementById("app");
+  if (!main || !view) { return; }
+  main.innerHTML = view.html();
+  setActiveNav(route);
+  document.title = "Japan in Numbers - " +
+    route.charAt(0).toUpperCase() + route.slice(1);
+  if (typeof view.mount === "function") {
+    view.mount();
+  }
 }
 
-window.addEventListener('hashchange', render);
+window.addEventListener("hashchange", render);
+
+// Redraw canvas charts after a resize settles, since canvas backing
+// stores are sized from the layout width at mount time.
+let resizeTimer = null;
+window.addEventListener("resize", function () {
+  if (resizeTimer !== null) { window.clearTimeout(resizeTimer); }
+  resizeTimer = window.setTimeout(render, 180);
+});
+
 render();

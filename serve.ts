@@ -1,85 +1,104 @@
-// serve.ts — a small dependency-free static server for app/.
-//
-//   node serve.ts              serve on port 8080
-//   node serve.ts --port 8124  serve on a custom port
-//
-// Only node:http and node:fs are used. Requests are confined to app/;
-// anything that tries to climb out of it is refused with a 403.
+/**
+ * Japan in Numbers - local preview server.
+ *
+ * A deliberately small static file server for previewing the site in
+ * app/ during development. It serves only files inside app/, refuses
+ * path escapes, sets a content type per extension, and never caches,
+ * so what you see is always the file on disk.
+ *
+ * Usage: node serve.ts [PORT]     (default port 4173)
+ * Then open http://localhost:4173/ in a browser.
+ */
 
-import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
-import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, extname, join, normalize, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = resolve(join(dirname(fileURLToPath(import.meta.url)), 'app'));
+const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "app");
 
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.ico': 'image/x-icon',
-  '.webp': 'image/webp',
-  '.txt': 'text/plain; charset=utf-8',
-  '.woff2': 'font/woff2',
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".txt": "text/plain; charset=utf-8",
 };
 
-function portFromArgs(): number {
-  const args = process.argv.slice(2);
-  let raw: string | undefined;
-  const at = args.indexOf('--port');
-  if (at >= 0) raw = args[at + 1];
-  const eq = args.find((a) => a.startsWith('--port='));
-  if (eq) raw = eq.slice('--port='.length);
-  if (raw !== undefined) {
-    const n = Number.parseInt(raw, 10);
-    if (Number.isInteger(n) && n > 0 && n < 65536) return n;
-  }
-  return 8080;
+function contentTypeFor(filePath: string): string {
+  return MIME_TYPES[extname(filePath).toLowerCase()] || "application/octet-stream";
 }
 
-const server = createServer(async (req, res) => {
+/**
+ * Map a request URL to a file inside APP_DIR, or return null when the
+ * path would escape the directory or names nothing servable.
+ */
+function resolveRequestPath(urlPath: string): string | null {
+  let decoded: string;
   try {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    let path = decodeURIComponent(url.pathname);
-    if (path === '/' || path === '') path = '/index.html';
-
-    // Traversal guard: normalise, then insist the result stays under root.
-    const file = normalize(join(root, path));
-    if (file !== root && !file.startsWith(root + sep)) {
-      res.writeHead(403, { 'content-type': 'text/plain' });
-      res.end('forbidden');
-      return;
-    }
-
-    let target = file;
-    const info = await stat(target).catch(() => null);
-    if (info?.isDirectory()) target = join(target, 'index.html');
-
-    const body = await readFile(target).catch(() => null);
-    if (body === null) {
-      res.writeHead(404, { 'content-type': 'text/plain' });
-      res.end('not found');
-      return;
-    }
-    res.writeHead(200, {
-      'content-type': MIME[extname(target).toLowerCase()] ?? 'application/octet-stream',
-      'cache-control': 'no-store',
-    });
-    res.end(body);
+    decoded = decodeURIComponent(urlPath);
   } catch {
-    res.writeHead(500, { 'content-type': 'text/plain' });
-    res.end('server error');
+    return null;
   }
-});
+  const cleaned = normalize(decoded).replace(/^[/\\]+/, "");
+  const candidate = resolve(APP_DIR, cleaned === "" ? "index.html" : cleaned);
+  if (candidate !== APP_DIR && !candidate.startsWith(APP_DIR + "/")) {
+    return null;
+  }
+  if (existsSync(candidate) && statSync(candidate).isDirectory()) {
+    return join(candidate, "index.html");
+  }
+  return candidate;
+}
 
-const port = portFromArgs();
-server.listen(port, () => {
-  console.log(`serving ${root} at http://localhost:${port}/`);
-});
+function send(res: ServerResponse, status: number, body: Buffer | string, type: string): void {
+  const buf = typeof body === "string" ? Buffer.from(body, "utf8") : body;
+  res.writeHead(status, {
+    "Content-Type": type,
+    "Content-Length": String(buf.length),
+    "Cache-Control": "no-store",
+  });
+  res.end(buf);
+}
+
+function handleRequest(req: IncomingMessage, res: ServerResponse): void {
+  const url = new URL(req.url || "/", "http://localhost");
+  const filePath = resolveRequestPath(url.pathname);
+  if (filePath === null) {
+    send(res, 400, "Bad request path", "text/plain; charset=utf-8");
+    return;
+  }
+  if (!existsSync(filePath) || !statSync(filePath).isFile()) {
+    send(res, 404, "Not found: " + url.pathname, "text/plain; charset=utf-8");
+    console.log("404 " + url.pathname);
+    return;
+  }
+  const body = readFileSync(filePath);
+  send(res, 200, body, contentTypeFor(filePath));
+  console.log("200 " + url.pathname + " (" + body.length + " bytes)");
+}
+
+function main(): void {
+  const portArg = process.argv[2];
+  const port = portArg ? Number.parseInt(portArg, 10) : 4173;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    console.error("Invalid port: " + String(portArg));
+    process.exit(1);
+  }
+  const server = createServer(handleRequest);
+  server.on("error", (err) => {
+    console.error("Server error: " + String(err));
+    process.exit(1);
+  });
+  server.listen(port, () => {
+    console.log("Japan in Numbers preview at http://localhost:" + port + "/");
+    console.log("Serving " + APP_DIR + " - Ctrl+C to stop.");
+  });
+}
+
+main();

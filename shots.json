@@ -1,1 +1,36 @@
-[{"file":"1-overview.jpg","path":"#/","viewport":{"height":800,"width":1280}},{"file":"2-people.jpg","path":"#/people","viewport":{"height":800,"width":1280}},{"file":"3-regions.jpg","path":"#/regions","viewport":{"height":800,"width":1280}},{"file":"4-phone.jpg","path":"#/","viewport":{"height":844,"width":390}}]
+{
+  "shots": [
+    {
+      "name": "1-overview",
+      "file": "screenshots/1-overview.jpg",
+      "width": 1280,
+      "height": 900,
+      "route": "#/overview",
+      "note": "Overview: headline indicators, population chart, fact grid."
+    },
+    {
+      "name": "2-population",
+      "file": "screenshots/2-population.jpg",
+      "width": 1280,
+      "height": 900,
+      "route": "#/population",
+      "note": "Population: range slider chart, age structure bars, key figures."
+    },
+    {
+      "name": "3-economy",
+      "file": "screenshots/3-economy.jpg",
+      "width": 1280,
+      "height": 900,
+      "route": "#/economy",
+      "note": "Economy: GDP trend chart, key figures, exports vs imports bars."
+    },
+    {
+      "name": "4-phone",
+      "file": "screenshots/4-phone.jpg",
+      "width": 390,
+      "height": 844,
+      "route": "#/overview",
+      "note": "Overview at phone width: responsive single-column layout."
+    }
+  ]
+}
